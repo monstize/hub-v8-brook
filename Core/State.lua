@@ -1,129 +1,121 @@
 --[[
 	Brookhaven Hub v8 - State Management
-	Gerencia toggle de módulos, conexões e cleanup
+	Controla conexões e estado dos módulos
 ]]
 
 local State = {}
 
--- Armazena estado de cada módulo
-local ModuleStates = {}
+local Services = require(script.Parent:FindFirstChild("Services"))
+local Utils = require(script.Parent:FindFirstChild("Utils"))
 
--- Armazena conexões de cada módulo
+-- Armazenar conexões ativas por módulo
 local ModuleConnections = {}
-
--- Armazena objetos criados por cada módulo
-local ModuleObjects = {}
-
---[[
-	Habilita um módulo
-	@param moduleName: Nome do módulo
-]]
-function State.EnableModule(moduleName)
-	if not ModuleStates[moduleName] then
-		ModuleStates[moduleName] = {}
-	end
-	ModuleStates[moduleName].Enabled = true
-end
+local ModuleStates = {}
+local ActiveTimers = {}
 
 --[[
-	Desabilita um módulo
+	Adiciona uma conexão controlada
 	@param moduleName: Nome do módulo
+	@param event: RBXScriptSignal
+	@param callback: função callback
 ]]
-function State.DisableModule(moduleName)
-	if ModuleStates[moduleName] then
-		ModuleStates[moduleName].Enabled = false
-	end
-end
-
---[[
-	Verifica se um módulo está habilitado
-	@param moduleName: Nome do módulo
-	@return boolean
-]]
-function State.IsModuleEnabled(moduleName)
-	if not ModuleStates[moduleName] then
-		return false
-	end
-	return ModuleStates[moduleName].Enabled == true
-end
-
---[[
-	Adiciona uma conexão a um módulo
-	@param moduleName: Nome do módulo
-	@param connection: RBXConnection ou função que será desconectada
-]]
-function State.AddConnection(moduleName, connection)
+function State.Connect(moduleName, event, callback)
 	if not ModuleConnections[moduleName] then
 		ModuleConnections[moduleName] = {}
 	end
+	
+	local connection = event:Connect(callback)
 	table.insert(ModuleConnections[moduleName], connection)
+	
+	return connection
 end
 
 --[[
-	Adiciona um objeto a um módulo (para cleanup depois)
+	Cria um timer que pode ser cancelado
 	@param moduleName: Nome do módulo
-	@param object: Objeto (Part, GUI, etc)
+	@param interval: Intervalo em segundos
+	@param callback: função callback
+	@return function para cancelar
 ]]
-function State.AddObject(moduleName, object)
-	if not ModuleObjects[moduleName] then
-		ModuleObjects[moduleName] = {}
+function State.Timer(moduleName, interval, callback)
+	if not ActiveTimers[moduleName] then
+		ActiveTimers[moduleName] = {}
 	end
-	table.insert(ModuleObjects[moduleName], object)
+	
+	local timerActive = true
+	local timerId = #ActiveTimers[moduleName] + 1
+	
+	task.spawn(function()
+		while timerActive do
+			task.wait(interval)
+			if timerActive and callback then
+				pcall(callback)
+			end
+		end
+	end)
+	
+	ActiveTimers[moduleName][timerId] = true
+	
+	return function()
+		timerActive = false
+		ActiveTimers[moduleName][timerId] = nil
+	end
 end
 
 --[[
-	Desconecta todas as conexões de um módulo
+	Define o estado de um módulo
+	@param moduleName: Nome do módulo
+	@param state: boolean ou table
+]]
+function State.SetModuleState(moduleName, state)
+	ModuleStates[moduleName] = state
+end
+
+--[[
+	Retorna o estado de um módulo
+	@param moduleName: Nome do módulo
+	@return state
+]]
+function State.GetModuleState(moduleName)
+	return ModuleStates[moduleName]
+end
+
+--[[
+	Limpa todas as conexões de um módulo
 	@param moduleName: Nome do módulo
 ]]
 function State.CleanupModule(moduleName)
 	if ModuleConnections[moduleName] then
 		for _, connection in ipairs(ModuleConnections[moduleName]) do
-			if connection.Disconnect then
-				pcall(function() connection:Disconnect() end)
-			elseif typeof(connection) == "function" then
-				pcall(connection)
+			if connection and connection.Connected then
+				connection:Disconnect()
 			end
 		end
-		ModuleConnections[moduleName] = {}
+		ModuleConnections[moduleName] = nil
 	end
 	
-	if ModuleObjects[moduleName] then
-		for _, object in ipairs(ModuleObjects[moduleName]) do
-			if object and object.Parent then
-				pcall(function() object:Destroy() end)
-			end
-		end
-		ModuleObjects[moduleName] = {}
+	if ActiveTimers[moduleName] then
+		ActiveTimers[moduleName] = nil
 	end
 	
 	ModuleStates[moduleName] = nil
 end
 
 --[[
-	Retorna todas as conexões de um módulo
-	@param moduleName: Nome do módulo
-	@return table
-]]
-function State.GetConnections(moduleName)
-	return ModuleConnections[moduleName] or {}
-end
-
---[[
-	Retorna todos os objetos de um módulo
-	@param moduleName: Nome do módulo
-	@return table
-]]
-function State.GetObjects(moduleName)
-	return ModuleObjects[moduleName] or {}
-end
-
---[[
-	Limpa tudo (ao desabilitar o hub)
+	Limpa tudo (desliga o hub)
 ]]
 function State.CleanupAll()
-	for moduleName, _ in pairs(ModuleStates) do
+	for moduleName, _ in pairs(ModuleConnections) do
 		State.CleanupModule(moduleName)
 	end
+end
+
+--[[
+	Retorna todas as conexões ativas
+	@return table
+]]
+function State.GetActiveConnections()
+	return ModuleConnections
 end
 
 return State
