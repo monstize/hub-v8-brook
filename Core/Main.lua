@@ -1,109 +1,122 @@
 --[[
-	Brookhaven Hub v8 - Core/Main.lua
-	Inicializador central do sistema
+	Brookhaven Hub v8 - Main Initializer
+	Inicializa o hub e carrega todos os módulos
 ]]
-
-local Config = require(script.Parent:WaitForChild("Config"))
-local Services = require(script.Parent.Core:WaitForChild("Services"))
-local State = require(script.Parent.Core:WaitForChild("State"))
-local Utils = require(script.Parent.Core:WaitForChild("Utils"))
 
 local Main = {}
 
--- Raiz do projeto
-Main.RootFolder = script.Parent
-Main.CoreFolder = Main.RootFolder:WaitForChild("Core")
-Main.ModulesFolder = Main.RootFolder:WaitForChild("Modules")
-Main.Config = Config
-Main.Services = Services
-Main.State = State
-Main.Utils = Utils
+local Services = require(script.Parent:FindFirstChild("Services"))
+local State = require(script.Parent:FindFirstChild("State"))
+local Utils = require(script.Parent:FindFirstChild("Utils"))
+local Config = require(script.Parent.Parent:FindFirstChild("Config"))
+
+-- Variáveis locais
+local HubEnabled = true
+local LoadedModules = {}
 
 --[[
-	Inicializa o sistema
+	Carrega um módulo do hub
+	@param modulePath: Caminho do módulo (ex: "Movement/Fly")
+	@return Module table ou nil
 ]]
-function Main:Initialize()
-	print("[Brookhaven Hub v8] Iniciando...")
+function Main.LoadModule(modulePath)
+	if LoadedModules[modulePath] then
+		return LoadedModules[modulePath]
+	end
 	
-	-- Aguardar o jogo carregar
-	game:WaitForChild("Players")
+	local pathParts = string.split(modulePath, "/")
+	local modulesFolder = script.Parent.Parent:FindFirstChild("Modules")
 	
-	-- Inicializar State
-	State:Initialize()
+	if not modulesFolder then
+		warn("Modules folder not found!")
+		return nil
+	end
 	
-	-- Carregar módulos
-	self:LoadModules()
-	
-	print("[Brookhaven Hub v8] Sistema inicializado com sucesso! ✅")
-	return true
-end
-
---[[
-	Carrega todos os módulos
-]]
-function Main:LoadModules()
-	local ModulesLoaded = 0
-	
-	-- Listar e carregar todos os módulos
-	for _, category in pairs(self.ModulesFolder:GetChildren()) do
-		if category:IsA("Folder") then
-			for _, moduleScript in pairs(category:GetChildren()) do
-				if moduleScript:IsA("ModuleScript") then
-					local Module = require(moduleScript)
-					if Module and type(Module) == "table" then
-						ModulesLoaded = ModulesLoaded + 1
-						print("[Brookhaven Hub v8] Módulo carregado: " .. category.Name .. "/" .. moduleScript.Name)
-					end
+	local current = modulesFolder
+	for i, part in ipairs(pathParts) do
+		if i < #pathParts then
+			current = current:FindFirstChild(part)
+			if not current then
+				warn("Module path not found: " .. modulePath)
+				return nil
+			end
+		else
+			local moduleScript = current:FindFirstChild(part .. ".lua")
+			if moduleScript then
+				local success, module = pcall(function()
+					return require(moduleScript)
+				end)
+				if success then
+					LoadedModules[modulePath] = module
+					return module
+				else
+					warn("Failed to load module " .. modulePath .. ": " .. tostring(module))
+					return nil
 				end
 			end
 		end
 	end
 	
-	print("[Brookhaven Hub v8] Total de módulos carregados: " .. ModulesLoaded)
+	return nil
 end
 
 --[[
-	Retorna um módulo pelo caminho
-	@param path: "Movement/Fly", "Protection/AntiVoid", etc
-	@return Module ou nil
+	Inicializa o Hub
 ]]
-function Main:GetModule(path)
-	local parts = Utils.SplitString(path, "/")
-	if #parts ~= 2 then return nil end
+function Main.Initialize()
+	print("🚀 Brookhaven Hub v8 Initializing...")
 	
-	local category = parts[1]
-	local moduleName = parts[2]
+	if not Services.LocalPlayer() then
+		warn("LocalPlayer not found!")
+		return false
+	end
 	
-	local categoryFolder = self.ModulesFolder:FindChild(category)
-	if not categoryFolder then return nil end
+	print("✅ Services initialized")
+	print("✅ State system ready")
+	print("✅ Hub initialized successfully!")
 	
-	local moduleScript = categoryFolder:FindChild(moduleName)
-	if not moduleScript then return nil end
-	
-	return require(moduleScript)
+	HubEnabled = true
+	return true
 end
 
 --[[
-	Limpa recursos ao desligar
+	Desabilita o Hub
 ]]
-function Main:Cleanup()
-	print("[Brookhaven Hub v8] Limpando recursos...")
-	State:Cleanup()
-	print("[Brookhaven Hub v8] Sistema desligado! ✅")
+function Main.Disable()
+	print("🛑 Disabling Brookhaven Hub v8...")
+	State.CleanupModule("Fly")
+	State.CleanupModule("Noclip")
+	State.CleanupModule("AntiVoid")
+	State.CleanupModule("AntiSit")
+	State.CleanupModule("CameraSpy")
+	State.CleanupModule("PlayerESP")
+	State.CleanupModule("IDTag")
+	State.CleanupModule("RadioSystem")
+	HubEnabled = false
+	print("✅ Hub disabled")
 end
 
--- Conectar ao evento de fechamento
-Services.RunService():BindToClose(function()
-	Main:Cleanup()
-end)
-
--- Iniciar sistema
-if game:IsLoaded() then
-	Main:Initialize()
-else
-	game.Loaded:Connect(function()
-		Main:Initialize()
-	end)
+--[[
+	Retorna se o Hub está habilitado
+	@return boolean
+]]
+function Main.IsEnabled()
+	return HubEnabled
 end
+
+--[[
+	Retorna todos os módulos carregados
+	@return table
+]]
+function Main.GetLoadedModules()
+	return LoadedModules
+end
+
+-- Auto-initialize
+if not game:IsLoaded() then
+	game.Loaded:Wait()
+end
+
+Main.Initialize()
 
 return Main

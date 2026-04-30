@@ -1,136 +1,120 @@
 --[[
 	Brookhaven Hub v8 - State Manager
-	Gerencia todas as conexões, toggles e estados
+	Controla conexões, toggles e estado dos módulos
 ]]
 
 local State = {}
-local Connections = {}
-local Toggles = {}
+
+-- Tabela de estado
+local ModuleStates = {}
+local ConnectionPool = {}
+local TimerPool = {}
 
 --[[
-	Cria um novo toggle com estado
-	@param name: Nome único do toggle
-	@param initialState: Estado inicial (default: false)
-	@return table com métodos Get, Set, Toggle
+	Define o estado de um módulo
+	@param moduleName: Nome do módulo
+	@param enabled: boolean
 ]]
-function State.CreateToggle(name, initialState)
-	if Toggles[name] then
-		return Toggles[name]
+function State.SetModuleState(moduleName, enabled)
+	ModuleStates[moduleName] = enabled
+end
+
+--[[
+	Retorna o estado de um módulo
+	@param moduleName: Nome do módulo
+	@return boolean
+]]
+function State.GetModuleState(moduleName)
+	return ModuleStates[moduleName] or false
+end
+
+--[[
+	Toggla o estado de um módulo
+	@param moduleName: Nome do módulo
+	@return novo estado
+]]
+function State.ToggleModule(moduleName)
+	local current = State.GetModuleState(moduleName)
+	State.SetModuleState(moduleName, not current)
+	return not current
+end
+
+--[[
+	Adiciona uma conexão ao pool
+	@param moduleName: Nome do módulo
+	@param connection: RBXScriptConnection
+]]
+function State.AddConnection(moduleName, connection)
+	if not ConnectionPool[moduleName] then
+		ConnectionPool[moduleName] = {}
 	end
+	table.insert(ConnectionPool[moduleName], connection)
+end
 
-	Toggles[name] = {
-		_value = initialState or false,
-		_callbacks = {},
-	}
-
-	local toggle = Toggles[name]
-
-	--[[Retorna o valor atual]]
-	function toggle:Get()
-		return self._value
+--[[
+	Adiciona um timer ao pool
+	@param moduleName: Nome do módulo
+	@param thread: coroutine
+]]
+function State.AddTimer(moduleName, thread)
+	if not TimerPool[moduleName] then
+		TimerPool[moduleName] = {}
 	end
+	table.insert(TimerPool[moduleName], thread)
+end
 
-	--[[Define o valor e dispara callbacks]]
-	function toggle:Set(value)
-		if self._value == value then return end
-		self._value = value
-		for _, callback in ipairs(self._callbacks) do
-			pcall(callback, value)
+--[[
+	Limpa todas as conexões e timers de um módulo
+	@param moduleName: Nome do módulo
+]]
+function State.CleanupModule(moduleName)
+	-- Desconectar conexões
+	if ConnectionPool[moduleName] then
+		for _, connection in ipairs(ConnectionPool[moduleName]) do
+			if connection and connection.Connected then
+				connection:Disconnect()
+			end
 		end
+		ConnectionPool[moduleName] = nil
 	end
 
-	--[[Inverte o valor]]
-	function toggle:Toggle()
-		self:Set(not self._value)
-	end
-
-	--[[Registra callback quando estado muda]]
-	function toggle:OnChanged(callback)
-		table.insert(self._callbacks, callback)
-	end
-
-	return toggle
-end
-
---[[
-	Retorna um toggle existente
-	@param name: Nome do toggle
-	@return table ou nil
-]]
-function State.GetToggle(name)
-	return Toggles[name]
-end
-
---[[
-	Conecta uma função a um evento com gerenciamento automático
-	@param event: RBXSignal (ex: RunService.Heartbeat)
-	@param callback: Função a executar
-	@param id: ID único da conexão (para limpeza)
-	@return Connection
-]]
-function State.Connect(event, callback, id)
-	if not id then
-		id = tostring(event) .. "_" .. math.random(1000, 9999)
-	end
-
-	local connection = event:Connect(callback)
-	Connections[id] = connection
-
-	return connection
-end
-
---[[
-	Desconecta uma conexão específica
-	@param id: ID da conexão
-]]
-function State.Disconnect(id)
-	if Connections[id] then
-		Connections[id]:Disconnect()
-		Connections[id] = nil
-	end
-end
-
---[[
-	Desconecta todas as conexões
-	Útil para cleanup ao desativar módulos
-]]
-function State.DisconnectAll()
-	for id, connection in pairs(Connections) do
-		if connection and connection.Connected then
-			connection:Disconnect()
+	-- Parar timers
+	if TimerPool[moduleName] then
+		for _, thread in ipairs(TimerPool[moduleName]) do
+			if thread then
+				coroutine.close(thread)
+			end
 		end
+		TimerPool[moduleName] = nil
 	end
-	Connections = {}
+
+	-- Resetar estado
+	ModuleStates[moduleName] = false
 end
 
 --[[
-	Desconecta conexões por padrão de ID
-	@param pattern: Padrão de nome (ex: "fly_" desconecta todas que começam com fly_)
+	Limpa todos os módulos
 ]]
-function State.DisconnectByPattern(pattern)
-	for id, connection in pairs(Connections) do
-		if id:match(pattern) and connection and connection.Connected then
-			connection:Disconnect()
-			Connections[id] = nil
-		end
+function State.CleanupAll()
+	for moduleName, _ in pairs(ModuleStates) do
+		State.CleanupModule(moduleName)
 	end
 end
 
 --[[
-	Retorna todas as conexões ativas (para debug)
+	Retorna informações de debug
 	@return table
 ]]
-function State.GetConnections()
-	return Connections
-end
-
---[[
-	Limpa todos os estados
-]]
-function State.Clear()
-	State.DisconnectAll()
-	Toggles = {}
-	Connections = {}
+function State.GetDebugInfo()
+	local info = {}
+	for moduleName, enabled in pairs(ModuleStates) do
+		info[moduleName] = {
+			Enabled = enabled,
+			Connections = ConnectionPool[moduleName] and #ConnectionPool[moduleName] or 0,
+			Timers = TimerPool[moduleName] and #TimerPool[moduleName] or 0,
+		}
+	end
+	return info
 end
 
 return State
