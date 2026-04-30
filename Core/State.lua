@@ -1,121 +1,89 @@
 --[[
 	Brookhaven Hub v8 - State Management
-	Controla conexões e estado dos módulos
+	Controla toggles, conexões e estados dos módulos
 ]]
 
 local State = {}
 
-local Services = require(script.Parent:FindFirstChild("Services"))
-local Utils = require(script.Parent:FindFirstChild("Utils"))
-
--- Armazenar conexões ativas por módulo
-local ModuleConnections = {}
+-- Tabela de estados dos módulos
 local ModuleStates = {}
-local ActiveTimers = {}
+
+-- Tabela de conexões ativas
+local Connections = {}
 
 --[[
-	Adiciona uma conexão controlada
+	Alterna o estado de um módulo
 	@param moduleName: Nome do módulo
-	@param event: RBXScriptSignal
-	@param callback: função callback
+	@param enabled: boolean (true para ativar, false para desativar)
 ]]
-function State.Connect(moduleName, event, callback)
-	if not ModuleConnections[moduleName] then
-		ModuleConnections[moduleName] = {}
+function State.SetModuleState(moduleName, enabled)
+	if ModuleStates[moduleName] == enabled then
+		return -- Já está neste estado
 	end
 	
-	local connection = event:Connect(callback)
-	table.insert(ModuleConnections[moduleName], connection)
-	
-	return connection
-end
-
---[[
-	Cria um timer que pode ser cancelado
-	@param moduleName: Nome do módulo
-	@param interval: Intervalo em segundos
-	@param callback: função callback
-	@return function para cancelar
-]]
-function State.Timer(moduleName, interval, callback)
-	if not ActiveTimers[moduleName] then
-		ActiveTimers[moduleName] = {}
-	end
-	
-	local timerActive = true
-	local timerId = #ActiveTimers[moduleName] + 1
-	
-	task.spawn(function()
-		while timerActive do
-			task.wait(interval)
-			if timerActive and callback then
-				pcall(callback)
-			end
-		end
-	end)
-	
-	ActiveTimers[moduleName][timerId] = true
-	
-	return function()
-		timerActive = false
-		ActiveTimers[moduleName][timerId] = nil
-	end
-end
-
---[[
-	Define o estado de um módulo
-	@param moduleName: Nome do módulo
-	@param state: boolean ou table
-]]
-function State.SetModuleState(moduleName, state)
-	ModuleStates[moduleName] = state
+	ModuleStates[moduleName] = enabled
+	print("[State] " .. moduleName .. " -> " .. (enabled and "ON" or "OFF"))
 end
 
 --[[
 	Retorna o estado de um módulo
 	@param moduleName: Nome do módulo
-	@return state
+	@return boolean
 ]]
 function State.GetModuleState(moduleName)
-	return ModuleStates[moduleName]
+	return ModuleStates[moduleName] or false
 end
 
 --[[
-	Limpa todas as conexões de um módulo
+	Registra uma conexão para controle
+	@param moduleName: Nome do módulo
+	@param connection: RBXScriptConnection
+]]
+function State.RegisterConnection(moduleName, connection)
+	if not Connections[moduleName] then
+		Connections[moduleName] = {}
+	end
+	
+	table.insert(Connections[moduleName], connection)
+end
+
+--[[
+	Desconecta todas as conexões de um módulo
 	@param moduleName: Nome do módulo
 ]]
 function State.CleanupModule(moduleName)
-	if ModuleConnections[moduleName] then
-		for _, connection in ipairs(ModuleConnections[moduleName]) do
-			if connection and connection.Connected then
-				connection:Disconnect()
-			end
+	if not Connections[moduleName] then
+		return
+	end
+	
+	for _, connection in ipairs(Connections[moduleName]) do
+		if connection and connection.Connected then
+			connection:Disconnect()
 		end
-		ModuleConnections[moduleName] = nil
 	end
 	
-	if ActiveTimers[moduleName] then
-		ActiveTimers[moduleName] = nil
-	end
-	
-	ModuleStates[moduleName] = nil
+	Connections[moduleName] = {}
+	ModuleStates[moduleName] = false
+	print("[State] Cleaned up: " .. moduleName)
 end
 
 --[[
-	Limpa tudo (desliga o hub)
-]]
-function State.CleanupAll()
-	for moduleName, _ in pairs(ModuleConnections) do
-		State.CleanupModule(moduleName)
-	end
-end
-
---[[
-	Retorna todas as conexões ativas
+	Retorna todas as conexões de um módulo
+	@param moduleName: Nome do módulo
 	@return table
 ]]
-function State.GetActiveConnections()
-	return ModuleConnections
+function State.GetConnections(moduleName)
+	return Connections[moduleName] or {}
+end
+
+--[[
+	Limpa todos os módulos
+]]
+function State.CleanupAll()
+	for moduleName, _ in pairs(Connections) do
+		State.CleanupModule(moduleName)
+	end
+	print("[State] All modules cleaned up")
 end
 
 return State

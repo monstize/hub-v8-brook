@@ -1,89 +1,98 @@
 --[[
 	Brookhaven Hub v8 - AntiSit Module
-	Impede que o jogador sente em cadeiras
+	Previne sentar automaticamente
 ]]
 
 local AntiSit = {}
 
-local Services = require(script.Parent.Parent.Parent:FindFirstChild("Core"):FindFirstChild("Services"))
-local State = require(script.Parent.Parent.Parent:FindFirstChild("Core"):FindFirstChild("State"))
-local Config = require(script.Parent.Parent.Parent:FindFirstChild("Config"))
+local Services = require(game:GetService("RunService").Parent.Parent.Parent:FindFirstChild("Core"):FindFirstChild("Services"))
+local State = require(game:GetService("RunService").Parent.Parent.Parent:FindFirstChild("Core"):FindFirstChild("State"))
+local Config = require(game:GetService("RunService").Parent.Parent.Parent:FindFirstChild("Config"))
 
--- Estado do módulo
-local AntiSitState = {
-	Enabled = false,
-}
+-- Variáveis do módulo
+local AntiSitActive = false
+local AntiSitConnections = {}
 
 --[[
 	Inicia o AntiSit
 ]]
 function AntiSit.Enable()
-	if AntiSitState.Enabled then return end
+	if AntiSitActive then return end
 	
-	local Humanoid = Services.LocalHumanoid()
-	if not Humanoid then
-		warn("Humanoid not found")
-		return false
+	local Character = Services.LocalCharacter()
+	if not Character then
+		warn("[AntiSit] No character found")
+		return
 	end
 	
-	AntiSitState.Enabled = true
-	State.EnableModule("AntiSit")
+	AntiSitActive = true
 	
-	-- Detecta tentativa de sentar
-	local connection = Humanoid.Seated:Connect(function(isSeated)
-		if isSeated and AntiSitState.Enabled then
-			-- Força levantar
-			Humanoid.Sit = false
-			print("🚫 AntiSit: Prevented sit")
+	-- Monitorar Seat e VehicleSeat
+	local humanoid = Services.LocalHumanoid()
+	if humanoid then
+		local connection = humanoid.Seated:Connect(function(isSeated, seat)
+			if isSeated and AntiSitActive then
+				if seat and (seat:IsA("Seat") or seat:IsA("VehicleSeat")) then
+					humanoid:MoveTo(Services.LocalRoot().Position)
+					print("⚠️ AntiSit: Prevented sitting")
+				end
 		end
 	end)
 	
-	State.AddConnection("AntiSit", connection)
+	table.insert(AntiSitConnections, connection)
+	end
 	
-	-- Loop de verificação por outros métodos de sentar
-	local checkConnection = Services.RunService().Heartbeat:Connect(function()
-		if not AntiSitState.Enabled then
-			checkConnection:Disconnect()
-			return
-		end
+	-- Loop contínuo para garantir
+	local heartbeatConnection = Services.RunService():BindToHeartbeat("AntiSitLoop", function()
+		if not AntiSitActive then return end
 		
+		local Character = Services.LocalCharacter()
 		local humanoid = Services.LocalHumanoid()
-		local character = Services.LocalCharacter()
 		
-		if not humanoid or not character then
+		if not Character or not humanoid then
 			AntiSit.Disable()
 			return
 		end
 		
-		-- Verifica se está sentado em algo
-		local humanoidState = humanoid:GetState()
-		if humanoidState == Enum.HumanoidStateType.Seated then
-			humanoid:ChangeState(Enum.HumanoidStateType.Running)
+		if humanoid.Sit then
+			humanoid.Sit = false
+			print("⚠️ AntiSit: Force stand")
 		end
 	end)
 	
-	State.AddConnection("AntiSit", checkConnection)
+	table.insert(AntiSitConnections, heartbeatConnection)
+	
+	State.SetModuleState("AntiSit", true)
 	print("✅ AntiSit enabled")
-	return true
 end
 
 --[[
-	Desabilita o AntiSit
+	Desativa o AntiSit
 ]]
 function AntiSit.Disable()
-	if not AntiSitState.Enabled then return end
+	if not AntiSitActive then return end
 	
-	AntiSitState.Enabled = false
-	State.DisableModule("AntiSit")
-	print("🛑 AntiSit disabled")
+	AntiSitActive = false
+	
+	for _, connection in ipairs(AntiSitConnections) do
+		if connection and connection.Connected then
+			connection:Disconnect()
+		end
+	end
+	
+	AntiSitConnections = {}
+	Services.RunService():UnbindFromHeartbeat("AntiSitLoop")
+	
+	State.SetModuleState("AntiSit", false)
+	print("✅ AntiSit disabled")
 end
 
 --[[
-	Retorna se AntiSit está habilitado
+	Retorna se está ativo
 	@return boolean
 ]]
 function AntiSit.IsEnabled()
-	return AntiSitState.Enabled
+	return AntiSitActive
 end
 
 return AntiSit

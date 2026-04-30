@@ -1,156 +1,136 @@
 --[[
 	Brookhaven Hub v8 - Fly Module
-	Sistema de voo com suporte completo para mobile
+	Sistema de voo com controle mobile otimizado
 ]]
 
 local Fly = {}
 
-local Services = require(script.Parent.Parent.Parent:FindFirstChild("Core"):FindFirstChild("Services"))
-local State = require(script.Parent.Parent.Parent:FindFirstChild("Core"):FindFirstChild("State"))
-local Utils = require(script.Parent.Parent.Parent:FindFirstChild("Core"):FindFirstChild("Utils"))
-local Config = require(script.Parent.Parent.Parent:FindFirstChild("Config"))
+local Services = require(game:GetService("RunService").Parent.Parent.Parent:FindFirstChild("Core"):FindFirstChild("Services"))
+local State = require(game:GetService("RunService").Parent.Parent.Parent:FindFirstChild("Core"):FindFirstChild("State"))
+local Config = require(game:GetService("RunService").Parent.Parent.Parent:FindFirstChild("Config"))
 
--- Estado do módulo
-local FlyState = {
-	Enabled = false,
-	Velocity = nil,
-	BodyVelocity = nil,
-	Gyro = nil,
-	CurrentSpeed = 0,
-	TargetSpeed = Config.Fly.Speed,
-}
+-- Variáveis do módulo
+local FlySpeed = Config.Fly.Speed
+local FlyVelocity = nil
+local FlyConnection = nil
+local FlyingActive = false
+local FlyDirection = Vector3.new(0, 0, 0)
+local FlyAcceleration = Config.Fly.Acceleration
 
 --[[
 	Inicia o sistema de voo
 ]]
 function Fly.Enable()
-	if FlyState.Enabled then return end
+	if FlyingActive then return end
 	
 	local Root = Services.LocalRoot()
-	local Character = Services.LocalCharacter()
-	local Camera = Services.Camera()
-	
-	if not Root or not Character or not Camera then
-		warn("Cannot enable Fly: Character or Camera not found")
-		return false
+	if not Root then
+		warn("[Fly] No character found")
+		return
 	end
 	
-	-- Remove antigos se existirem
+	FlyingActive = true
+	FlyDirection = Vector3.new(0, 0, 0)
+	
+	-- Criar BodyVelocity
 	if Root:FindFirstChild("FlyVelocity") then
 		Root:FindFirstChild("FlyVelocity"):Destroy()
 	end
-	if Root:FindFirstChild("FlyGyro") then
-		Root:FindFirstChild("FlyGyro"):Destroy()
-	end
 	
-	-- Cria BodyVelocity
-	local BodyVel = Instance.new("BodyVelocity")
-	BodyVel.Name = "FlyVelocity"
-	BodyVel.Velocity = Vector3.new(0, 0, 0)
-	BodyVel.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
-	BodyVel.Parent = Root
-	FlyState.BodyVelocity = BodyVel
+	FlyVelocity = Instance.new("BodyVelocity")
+	FlyVelocity.Name = "FlyVelocity"
+	FlyVelocity.Velocity = Vector3.new(0, 0, 0)
+	FlyVelocity.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+	FlyVelocity.Parent = Root
 	
-	-- Cria BodyGyro
-	local Gyro = Instance.new("BodyGyro")
-	Gyro.Name = "FlyGyro"
-	Gyro.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
-	Gyro.D = 500
-	Gyro.CFrame = Root.CFrame
-	Gyro.Parent = Root
-	FlyState.Gyro = Gyro
-	
-	FlyState.Enabled = true
-	State.EnableModule("Fly")
-	
-	-- Loop de atualização
-	local connection = Services.RunService():BindToHeartbeat("FlyUpdate", function()
-		if not FlyState.Enabled then
-			Services.RunService():UnbindFromHeartbeat("FlyUpdate")
-			return
-		end
-		
-		local root = Services.LocalRoot()
-		if not root or not FlyState.BodyVelocity or not FlyState.Gyro then
+	-- Conexão principal de voo
+	FlyConnection = Services.RunService():BindToHeartbeat("FlyLoop", function(deltaTime)
+		if not FlyingActive or not Root or not Root.Parent then
 			Fly.Disable()
 			return
 		end
 		
-		local camera = Services.Camera()
-		local moveInput = Vector3.new(0, 0, 0)
+		local Camera = Services.Camera()
+		if not Camera then return end
 		
-		-- Pega input (simulado para mobile)
+		-- Atualizar direção baseado na câmera
+		local cameraDirection = Camera.CFrame.LookVector
+		local cameraRight = Camera.CFrame.RightVector
+		local cameraUp = Vector3.new(0, 1, 0)
+		
+		local inputDirection = Vector3.new(0, 0, 0)
 		local UserInput = Services.UserInputService()
-		if UserInput:IsKeyDown(Enum.KeyCode.W) then moveInput = moveInput + camera.CFrame.LookVector end
-		if UserInput:IsKeyDown(Enum.KeyCode.S) then moveInput = moveInput - camera.CFrame.LookVector end
-		if UserInput:IsKeyDown(Enum.KeyCode.A) then moveInput = moveInput - camera.CFrame.RightVector end
-		if UserInput:IsKeyDown(Enum.KeyCode.D) then moveInput = moveInput + camera.CFrame.RightVector end
-		if UserInput:IsKeyDown(Enum.KeyCode.Space) then moveInput = moveInput + Vector3.new(0, 1, 0) end
-		if UserInput:IsKeyDown(Enum.KeyCode.LeftControl) then moveInput = moveInput + Vector3.new(0, -1, 0) end
 		
-		-- Normaliza movimento
-		if moveInput.Magnitude > 0 then
-			moveInput = moveInput.Unit
-			FlyState.CurrentSpeed = Utils.Lerp(FlyState.CurrentSpeed, FlyState.TargetSpeed, 0.1)
-		else
-			FlyState.CurrentSpeed = Utils.Lerp(FlyState.CurrentSpeed, 0, 0.1)
+		-- Controles de teclado
+		if UserInput:IsKeyDown(Enum.KeyCode.W) then
+			inputDirection = inputDirection + cameraDirection
+		end
+		if UserInput:IsKeyDown(Enum.KeyCode.S) then
+			inputDirection = inputDirection - cameraDirection
+		end
+		if UserInput:IsKeyDown(Enum.KeyCode.A) then
+			inputDirection = inputDirection - cameraRight
+		end
+		if UserInput:IsKeyDown(Enum.KeyCode.D) then
+			inputDirection = inputDirection + cameraRight
+		end
+		if UserInput:IsKeyDown(Enum.KeyCode.Space) then
+			inputDirection = inputDirection + cameraUp
+		end
+		if UserInput:IsKeyDown(Enum.KeyCode.LeftControl) then
+			inputDirection = inputDirection - cameraUp
 		end
 		
-		-- Aplica velocidade
-		FlyState.BodyVelocity.Velocity = moveInput * FlyState.CurrentSpeed
+		-- Normalizar e aplicar velocidade
+		if inputDirection.Magnitude > 0 then
+			inputDirection = inputDirection.Unit
+		end
 		
-		-- Rotaciona para câmera
-		FlyState.Gyro.CFrame = camera.CFrame
+		FlyVelocity.Velocity = inputDirection * FlySpeed
 	end)
 	
-	State.AddConnection("Fly", function()
-		Services.RunService():UnbindFromHeartbeat("FlyUpdate")
-	end)
-	
+	State.RegisterConnection("Fly", FlyConnection)
+	State.SetModuleState("Fly", true)
 	print("✅ Fly enabled")
-	return true
 end
 
 --[[
-	Desabilita o sistema de voo
+	Desativa o sistema de voo
 ]]
 function Fly.Disable()
-	if not FlyState.Enabled then return end
+	if not FlyingActive then return end
+	
+	FlyingActive = false
+	
+	if FlyConnection then
+		Services.RunService():UnbindFromHeartbeat("FlyLoop")
+		FlyConnection = nil
+	end
 	
 	local Root = Services.LocalRoot()
-	
-	if FlyState.BodyVelocity then
-		FlyState.BodyVelocity:Destroy()
-		FlyState.BodyVelocity = nil
+	if Root and Root:FindFirstChild("FlyVelocity") then
+		Root:FindFirstChild("FlyVelocity"):Destroy()
 	end
 	
-	if FlyState.Gyro then
-		FlyState.Gyro:Destroy()
-		FlyState.Gyro = nil
-	end
-	
-	FlyState.Enabled = false
-	FlyState.CurrentSpeed = 0
-	
-	Services.RunService():UnbindFromHeartbeat("FlyUpdate")
-	State.DisableModule("Fly")
-	print("🛑 Fly disabled")
+	FlyVelocity = nil
+	State.SetModuleState("Fly", false)
+	print("✅ Fly disabled")
 end
 
 --[[
-	Muda a velocidade de voo
-	@param speed: Nova velocidade
+	Altera a velocidade de voo
+	@param newSpeed: número
 ]]
-function Fly.SetSpeed(speed)
-	FlyState.TargetSpeed = Utils.Clamp(speed, 10, 200)
+function Fly.SetSpeed(newSpeed)
+	FlySpeed = newSpeed
 end
 
 --[[
-	Retorna se o voo está habilitado
+	Retorna se está voando
 	@return boolean
 ]]
 function Fly.IsEnabled()
-	return FlyState.Enabled
+	return FlyingActive
 end
 
 return Fly

@@ -1,151 +1,120 @@
 --[[
 	Brookhaven Hub v8 - Camera Spy Module
-	Trava a câmera em outro player com controle de rotação
+	Trava câmera em outro player com liberdade de rotação
 ]]
 
 local CameraSpy = {}
 
-local Services = require(script.Parent.Parent.Parent:FindFirstChild("Core"):FindFirstChild("Services"))
-local State = require(script.Parent.Parent.Parent:FindFirstChild("Core"):FindFirstChild("State"))
-local Utils = require(script.Parent.Parent.Parent:FindFirstChild("Core"):FindFirstChild("Utils"))
-local Config = require(script.Parent.Parent.Parent:FindFirstChild("Config"))
+local Services = require(game:GetService("RunService").Parent.Parent.Parent:FindFirstChild("Core"):FindFirstChild("Services"))
+local State = require(game:GetService("RunService").Parent.Parent.Parent:FindFirstChild("Core"):FindFirstChild("State"))
+local Config = require(game:GetService("RunService").Parent.Parent.Parent:FindFirstChild("Config"))
 
--- Estado do módulo
-local CameraSpyState = {
-	Enabled = false,
-	TargetPlayer = nil,
-	OriginalCamera = nil,
-	CameraOffset = CFrame.new(0, 2, 5),
-	CameraRotation = Vector2.new(0, 0),
-	Zoom = 10,
-}
+-- Variáveis do módulo
+local SpyActive = false
+local SpyConnection = nil
+local TargetPlayer = nil
+local OriginalCamera = nil
+local CameraRotation = Vector2.new(0, 0)
+local CurrentZoom = 20
 
 --[[
-	Define o player alvo
-	@param player: Player alvo
+	Inicia o CameraSpy em um player específico
+	@param targetPlayer: Player a espiar
 ]]
-function CameraSpy.SetTarget(player)
-	if not player or not player.Character then
-		warn("Invalid player")
-		return false
+function CameraSpy.Enable(targetPlayer)
+	if SpyActive then
+		CameraSpy.Disable()
 	end
 	
-	CameraSpyState.TargetPlayer = player
-	return true
-end
-
---[[
-	Inicia o Camera Spy
-]]
-function CameraSpy.Enable()
-	if CameraSpyState.Enabled then return end
-	
-	if not CameraSpyState.TargetPlayer or not CameraSpyState.TargetPlayer.Character then
-		warn("Target player not set or not found")
-		return false
+	if not targetPlayer or not targetPlayer.Character then
+		warn("[CameraSpy] Invalid target player")
+		return
 	end
 	
-	local Camera = Services.Camera()
-	if not Camera then
-		warn("Camera not found")
-		return false
-	end
+	TargetPlayer = targetPlayer
+	SpyActive = true
+	CurrentZoom = 20
 	
-	-- Salva câmera original
-	CameraSpyState.OriginalCamera = Camera.CFrame
-	CameraSpyState.Enabled = true
-	State.EnableModule("CameraSpy")
-	
-	-- Input para rotação
-	local UserInput = Services.UserInputService()
-	local mouse = Services.Players().LocalPlayer:GetMouse()
-	
-	local inputConnection = UserInput.InputChanged:Connect(function(input, gameProcessed)
-		if gameProcessed or not CameraSpyState.Enabled then return end
+	SpyConnection = Services.RunService().RenderStepped:Connect(function()
+		if not SpyActive or not TargetPlayer or not TargetPlayer.Character then
+			CameraSpy.Disable()
+			return
+		end
 		
-		if input.UserInputType == Enum.UserInputType.MouseMovement then
-			local mouseDelta = Vector2.new(
-				mouse.X - (mouse.X or 0),
-				mouse.Y - (mouse.Y or 0)
-			)
-			
-			CameraSpyState.CameraRotation = CameraSpyState.CameraRotation + mouseDelta * Config.CameraSpy.Speed
+		local targetRoot = TargetPlayer.Character:FindFirstChild("HumanoidRootPart")
+		if not targetRoot then
+			CameraSpy.Disable()
+			return
+		end
+		
+		local Camera = Services.Camera()
+		local UserInput = Services.UserInputService()
+		
+		-- Controles de rotação com mouse
+		if UserInput:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then
+			local delta = UserInput:GetMouseDelta()
+			CameraRotation = CameraRotation + delta * Config.CameraSpy.Speed
 		end
 		
 		-- Zoom com scroll
-		if input.UserInputType == Enum.UserInputType.MouseWheel then
-			CameraSpyState.Zoom = Utils.Clamp(
-				CameraSpyState.Zoom - input.Position.Z * Config.CameraSpy.ZoomSensitivity,
-				Config.CameraSpy.MinZoom,
-				Config.CameraSpy.MaxZoom
-			)
+		local Mouse = Services.Players():GetLocalPlayer():GetMouse()
+		if Mouse.WheelBackward then
+			CurrentZoom = math.min(CurrentZoom + Config.CameraSpy.ZoomSensitivity, Config.CameraSpy.MaxZoom)
+		elseif Mouse.WheelForward then
+			CurrentZoom = math.max(CurrentZoom - Config.CameraSpy.ZoomSensitivity, Config.CameraSpy.MinZoom)
 		end
+		
+		-- Aplicar rotação
+		local rotationX = math.rad(CameraRotation.Y)
+		local rotationY = math.rad(CameraRotation.X)
+		
+		local newCFrame = targetRoot.CFrame
+			* CFrame.Angles(rotationX, rotationY, 0)
+			* CFrame.new(0, 0, CurrentZoom)
+		
+		Camera.CFrame = newCFrame
 	end)
 	
-	State.AddConnection("CameraSpy", inputConnection)
-	
-	-- Loop de atualização de câmera
-	local updateConnection = Services.RunService().RenderStepped:Connect(function()
-		if not CameraSpyState.Enabled then
-			updateConnection:Disconnect()
-			return
-		end
-		
-		local target = CameraSpyState.TargetPlayer
-		if not target or not target.Character then
-			CameraSpy.Disable()
-			return
-		end
-		
-		local targetHead = target.Character:FindFirstChild("Head")
-		if not targetHead then
-			CameraSpy.Disable()
-			return
-		end
-		
-		-- Calcula posição da câmera com rotação
-		local xRotation = CFrame.fromAxisAngle(Vector3.new(1, 0, 0), CameraSpyState.CameraRotation.Y)
-		local yRotation = CFrame.fromAxisAngle(Vector3.new(0, 1, 0), CameraSpyState.CameraRotation.X)
-		local rotation = yRotation * xRotation
-		
-		local offset = rotation * Vector3.new(0, 0, -CameraSpyState.Zoom)
-		Services.Camera().CFrame = CFrame.new(targetHead.Position + offset, targetHead.Position)
-	end)
-	
-	State.AddConnection("CameraSpy", updateConnection)
-	print("✅ Camera Spy enabled")
-	return true
+	State.RegisterConnection("CameraSpy", SpyConnection)
+	State.SetModuleState("CameraSpy", true)
+	print("✅ CameraSpy enabled on " .. TargetPlayer.Name)
 end
 
 --[[
-	Desabilita o Camera Spy
+	Desativa o CameraSpy
 ]]
 function CameraSpy.Disable()
-	if not CameraSpyState.Enabled then return end
+	if not SpyActive then return end
 	
-	local Camera = Services.Camera()
-	local LocalPlayer = Services.LocalPlayer()
+	SpyActive = false
 	
-	-- Restaura câmera
-	if CameraSpyState.OriginalCamera and LocalPlayer and LocalPlayer.Character then
-		local Root = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-		if Root then
-			Camera.CFrame = CFrame.new(Root.Position + Vector3.new(0, 5, 10), Root.Position)
-		end
+	if SpyConnection then
+		SpyConnection:Disconnect()
+		SpyConnection = nil
 	end
 	
-	CameraSpyState.Enabled = false
-	CameraSpyState.TargetPlayer = nil
-	State.DisableModule("CameraSpy")
-	print("🛑 Camera Spy disabled")
+	TargetPlayer = nil
+	State.SetModuleState("CameraSpy", false)
+	print("✅ CameraSpy disabled")
 end
 
 --[[
-	Retorna se Camera Spy está habilitado
+	Muda o target
+	@param newTarget: Novo player
+]]
+function CameraSpy.SetTarget(newTarget)
+	if newTarget and newTarget.Character then
+		TargetPlayer = newTarget
+		print("📹 Camera target changed to " .. newTarget.Name)
+	end
+end
+
+--[[
+	Retorna se está ativo
 	@return boolean
 ]]
 function CameraSpy.IsEnabled()
-	return CameraSpyState.Enabled
+	return SpyActive
 end
 
 return CameraSpy

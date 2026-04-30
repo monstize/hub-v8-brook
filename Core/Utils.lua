@@ -1,20 +1,27 @@
 --[[
-	Brookhaven Hub v8 - Utilities
-	Funções úteis compartilhadas entre módulos
+	Brookhaven Hub v8 - Utility Functions
+	Funções auxiliares para o hub
 ]]
 
 local Utils = {}
-
 local Services = require(script.Parent:FindFirstChild("Services"))
 
 --[[
-	Verifica se um objeto é válido
-	@param obj: Objeto a verificar
-	@return boolean
+	Cria um tween suave
+	@param object: Objeto a ser animado
+	@param properties: Propriedades a animar (ex: {Position = Vector3.new(0,0,0)})
+	@param duration: Duração em segundos
+	@param style: TweenStyle (default: Quad)
+	@param direction: EasingDirection (default: InOut)
 ]]
-function Utils.IsValid(obj)
-	if not obj then return false end
-	return pcall(function() return obj.Parent end)
+function Utils.CreateTween(object, properties, duration, style, direction)
+	local TweenService = Services.TweenService()
+	style = style or Enum.EasingStyle.Quad
+	direction = direction or Enum.EasingDirection.InOut
+	
+	local tweenInfo = TweenInfo.new(duration, style, direction)
+	local tween = TweenService:Create(object, tweenInfo, properties)
+	return tween
 end
 
 --[[
@@ -23,210 +30,131 @@ end
 	@param pos2: Vector3
 	@return number
 ]]
-function Utils.Distance(pos1, pos2)
+function Utils.GetDistance(pos1, pos2)
 	return (pos1 - pos2).Magnitude
 end
 
 --[[
-	Retorna a distância entre o player e outro ponto
-	@param pos: Vector3
-	@return number
+	Retorna a cor baseada na distância
+	@param distance: número
+	@param maxDistance: número máximo
+	@return Color3
 ]]
-function Utils.DistanceToLocal(pos)
-	local Root = Services.LocalRoot()
-	if not Root then return math.huge end
-	return Utils.Distance(Root.Position, pos)
+function Utils.GetColorByDistance(distance, maxDistance)
+	local ratio = math.min(distance / maxDistance, 1)
+	if ratio < 0.5 then
+		return Color3.fromRGB(255, 0, 0) -- Vermelho (perto)
+	elseif ratio < 0.75 then
+		return Color3.fromRGB(255, 255, 0) -- Amarelo (médio)
+	else
+		return Color3.fromRGB(0, 255, 0) -- Verde (longe)
+	end
 end
 
 --[[
-	Cria um Tween
-	@param object: Objeto a animar
-	@param duration: Duração em segundos
-	@param properties: Propriedades a animar
-	return Tween
+	Limpa todas as conexões de um objeto
+	@param connections: table com as conexões
 ]]
-function Utils.CreateTween(object, duration, properties)
-	local TweenService = Services.TweenService()
-	local TweenInfo = TweenInfo.new(
-		duration,
-		Enum.EasingStyle.Quad,
-		Enum.EasingDirection.InOut
-	)
-	return TweenService:Create(object, TweenInfo, properties)
-end
-
---[[
-	Inicia uma tween
-	@param object: Objeto a animar
-	@param duration: Duração em segundos
-	@param properties: Propriedades a animar
-	return Tween
-]]
-function Utils.Tween(object, duration, properties)
-	local tween = Utils.CreateTween(object, duration, properties)
-	tween:Play()
-	return tween
-end
-
---[[
-	Cria um TextLabel com estilo
-	@param parent: Parent do label
-	@param text: Texto inicial
-	@param config: Tabela com configurações (Size, Position, etc)
-	return TextLabel
-]]
-function Utils.CreateTextLabel(parent, text, config)
-	local label = Instance.new("TextLabel")
-	label.Parent = parent
-	label.Text = text
-	label.TextScaled = true
-	label.BackgroundTransparency = 1
-	label.TextColor3 = Color3.fromRGB(255, 255, 255)
-	label.Font = Enum.Font.GothamBold
-	
-	if config then
-		for prop, value in pairs(config) do
-			if label:FindFirstChild(prop) or pcall(function() label[prop] = value end) then
-				pcall(function() label[prop] = value end)
-			end
+function Utils.CleanupConnections(connections)
+	if not connections then return end
+	for _, connection in ipairs(connections) do
+		if connection and connection.Connected then
+			connection:Disconnect()
 		end
 	end
-	
+end
+
+--[[
+	Cria um TextLabel customizado
+	@param parent: Container pai
+	@param text: Texto inicial
+	@param size: UDim2
+	@param position: UDim2
+	@return TextLabel
+]]
+function Utils.CreateTextLabel(parent, text, size, position)
+	local label = Instance.new("TextLabel")
+	label.Name = "Label"
+	label.Text = text
+	label.Size = size
+	label.Position = position
+	label.BackgroundTransparency = 1
+	label.TextColor3 = Color3.fromRGB(255, 255, 255)
+	label.TextSize = 14
+	label.Font = Enum.Font.GothamBold
+	label.Parent = parent
 	return label
 end
 
 --[[
-	Cria um Frame com estilo
-	@param parent: Parent do frame
-	@param config: Tabela com configurações
-	return Frame
-]]
-function Utils.CreateFrame(parent, config)
-	local frame = Instance.new("Frame")
-	frame.Parent = parent
-	frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-	frame.BorderSizePixel = 0
-	
-	if config then
-		for prop, value in pairs(config) do
-			pcall(function() frame[prop] = value end)
-		end
-	end
-	
-	return frame
-end
-
---[[
-	Cria um TextButton com estilo
-	@param parent: Parent do botão
+	Cria um botão customizado
+	@param parent: Container pai
 	@param text: Texto do botão
-	@param config: Tabela com configurações
-	return TextButton
+	@param size: UDim2
+	@param position: UDim2
+	@param callback: Função ao clicar
+	@return TextButton
 ]]
-function Utils.CreateButton(parent, text, config)
+function Utils.CreateButton(parent, text, size, position, callback)
 	local button = Instance.new("TextButton")
-	button.Parent = parent
+	button.Name = "Button"
 	button.Text = text
-	button.TextScaled = true
+	button.Size = size
+	button.Position = position
 	button.BackgroundColor3 = Color3.fromRGB(50, 150, 250)
-	button.BorderSizePixel = 0
-	button.Font = Enum.Font.GothamBold
 	button.TextColor3 = Color3.fromRGB(255, 255, 255)
+	button.TextSize = 14
+	button.Font = Enum.Font.GothamBold
+	button.BorderSizePixel = 0
+	button.Parent = parent
 	
-	if config then
-		for prop, value in pairs(config) do
-			pcall(function() button[prop] = value end)
-		end
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 8)
+	corner.Parent = button
+	
+	if callback then
+		button.MouseButton1Click:Connect(callback)
 	end
 	
 	return button
 end
 
 --[[
-	Adiciona corner radius a um GUI object
-	@param object: Objeto GUI
-	@param radius: Tamanho do radius
+	Retorna se o player está em um dispositivo mobile
+	@return boolean
 ]]
-function Utils.AddCornerRadius(object, radius)
+function Utils.IsMobile()
+	local UserInputService = Services.UserInputService()
+	return UserInputService.TouchEnabled and not UserInputService.MouseEnabled
+end
+
+--[[
+	Cria uma caixa de entrada (TextBox)
+	@param parent: Container pai
+	@param placeholder: Texto placeholder
+	@param size: UDim2
+	@param position: UDim2
+	@return TextBox
+]]
+function Utils.CreateTextBox(parent, placeholder, size, position)
+	local textbox = Instance.new("TextBox")
+	textbox.Name = "TextBox"
+	textbox.PlaceholderText = placeholder
+	textbox.Size = size
+	textbox.Position = position
+	textbox.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+	textbox.TextColor3 = Color3.fromRGB(255, 255, 255)
+	textbox.TextSize = 14
+	textbox.Font = Enum.Font.Gotham
+	textbox.BorderSizePixel = 0
+	textbox.ClearTextOnFocus = false
+	textbox.Parent = parent
+	
 	local corner = Instance.new("UICorner")
-	corner.CornerRadius = radius or UDim.new(0, 8)
-	corner.Parent = object
-end
-
---[[
-	Adiciona padding a um GUI object
-	@param object: Objeto GUI
-	@param padding: Tamanho do padding
-]]
-function Utils.AddPadding(object, padding)
-	local pad = Instance.new("UIPadding")
-	pad.Parent = object
-	pad.PaddingBottom = padding or UDim.new(0, 8)
-	pad.PaddingLeft = padding or UDim.new(0, 8)
-	pad.PaddingRight = padding or UDim.new(0, 8)
-	pad.PaddingTop = padding or UDim.new(0, 8)
-end
-
---[[
-	Formateia um número para distância legível
-	@param distance: Número
-	return string
-]]
-function Utils.FormatDistance(distance)
-	if distance > 1000 then
-		return string.format("%.1fk", distance / 1000)
-	else
-		return string.format("%.0f", distance)
-	end
-end
-
---[[
-	Retorna uma cor baseada na distância
-	@param distance: Número
-	@param maxDistance: Distância máxima
-	return Color3
-]]
-function Utils.ColorByDistance(distance, maxDistance)
-	local ratio = math.min(distance / maxDistance, 1)
+	corner.CornerRadius = UDim.new(0, 8)
+	corner.Parent = textbox
 	
-	if ratio < 0.5 then
-		-- Verde para próximo
-		return Color3.fromRGB(0, 255, 0)
-	elseif ratio < 0.75 then
-		-- Amarelo para médio
-		return Color3.fromRGB(255, 255, 0)
-	else
-		-- Vermelho para longe
-		return Color3.fromRGB(255, 0, 0)
-	end
-end
-
---[[
-	Aguarda condição ser true
-	@param condition: função que retorna boolean
-	@param timeout: Timeout em segundos (opcional)
-]]
-function Utils.WaitFor(condition, timeout)
-	timeout = timeout or 10
-	local startTime = tick()
-	
-	while not condition() do
-		task.wait(0.1)
-		if tick() - startTime > timeout then
-			return false
-		end
-	end
-	
-	return true
-end
-
---[[
-	Retorna FPS atual
-	@return number
-]]
-function Utils.GetFPS()
-	local RunService = Services.RunService()
-	return math.round(1 / RunService.Heartbeat:Wait())
+	return textbox
 end
 
 return Utils
